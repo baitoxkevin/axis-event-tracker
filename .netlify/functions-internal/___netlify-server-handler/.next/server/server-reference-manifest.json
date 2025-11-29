@@ -1,0 +1,1 @@
+{"node":{"00253ae66b66cbc5bfc0864290f6e3843dbd481aae":{"workers":{"app/api/trpc/[trpc]/route":{"moduleId":"434","async":false}},"layer":{"app/api/trpc/[trpc]/route":"rsc"},"filename":"lib/supabase/db-client.ts","exportedName":"createDbClient"}},"edge":{},"encryptionKey":"RATgrBtelkyfE7kFp8tkJxuUy8pVQutvD04cJcPCyVI="}
