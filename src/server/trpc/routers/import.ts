@@ -236,7 +236,7 @@ export const importRouter = router({
         }
       }
 
-      // Create import session in pending state
+      // Create import session in pending state with raw data for comparison
       const { data: session, error: sessionError } = await ctx.supabase
         .from('import_sessions')
         .insert({
@@ -250,6 +250,7 @@ export const importRouter = router({
           rows_unchanged: diff.unchanged.length,
           rows_error: diff.errors.length,
           error_details: diff.errors.length > 0 ? { errors: diff.errors } : null,
+          raw_data: data, // Store original import data for comparison
         })
         .select()
         .single();

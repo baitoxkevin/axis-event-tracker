@@ -371,7 +371,7 @@ export const compareImportsTool: ToolDefinition = {
     // Get the two most recent imports if not specified
     const { data: imports, error: fetchError } = await supabase
       .from('import_sessions')
-      .select('id, filename, status, rows_added, rows_updated, rows_unchanged, rows_failed, created_at, completed_at')
+      .select('id, filename, status, rows_added, rows_modified, rows_unchanged, rows_error, created_at, completed_at')
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(2);
@@ -396,33 +396,219 @@ export const compareImportsTool: ToolDefinition = {
         filename: latestImport.filename,
         date: latestImport.created_at,
         rows_added: latestImport.rows_added || 0,
-        rows_updated: latestImport.rows_updated || 0,
+        rows_modified: latestImport.rows_modified || 0,
         rows_unchanged: latestImport.rows_unchanged || 0,
-        rows_failed: latestImport.rows_failed || 0,
-        total_processed: (latestImport.rows_added || 0) + (latestImport.rows_updated || 0) + (latestImport.rows_unchanged || 0),
+        rows_error: latestImport.rows_error || 0,
+        total_processed: (latestImport.rows_added || 0) + (latestImport.rows_modified || 0) + (latestImport.rows_unchanged || 0),
       },
       previous: {
         filename: previousImport.filename,
         date: previousImport.created_at,
         rows_added: previousImport.rows_added || 0,
-        rows_updated: previousImport.rows_updated || 0,
+        rows_modified: previousImport.rows_modified || 0,
         rows_unchanged: previousImport.rows_unchanged || 0,
-        rows_failed: previousImport.rows_failed || 0,
-        total_processed: (previousImport.rows_added || 0) + (previousImport.rows_updated || 0) + (previousImport.rows_unchanged || 0),
+        rows_error: previousImport.rows_error || 0,
+        total_processed: (previousImport.rows_added || 0) + (previousImport.rows_modified || 0) + (previousImport.rows_unchanged || 0),
       },
       differences: {
         new_guests_in_latest: latestImport.rows_added || 0,
-        guests_updated_in_latest: latestImport.rows_updated || 0,
+        guests_modified_in_latest: latestImport.rows_modified || 0,
         guests_unchanged: latestImport.rows_unchanged || 0,
-        total_change: ((latestImport.rows_added || 0) + (latestImport.rows_updated || 0) + (latestImport.rows_unchanged || 0)) -
-                      ((previousImport.rows_added || 0) + (previousImport.rows_updated || 0) + (previousImport.rows_unchanged || 0)),
+        total_change: ((latestImport.rows_added || 0) + (latestImport.rows_modified || 0) + (latestImport.rows_unchanged || 0)) -
+                      ((previousImport.rows_added || 0) + (previousImport.rows_modified || 0) + (previousImport.rows_unchanged || 0)),
       },
-      summary: `The latest import (${latestImport.filename}) added ${latestImport.rows_added || 0} new guests and updated ${latestImport.rows_updated || 0} existing guests compared to the previous import (${previousImport.filename}).`,
+      summary: `The latest import (${latestImport.filename}) added ${latestImport.rows_added || 0} new guests and modified ${latestImport.rows_modified || 0} existing guests compared to the previous import (${previousImport.filename}).`,
     };
 
     return {
       success: true,
       data: comparison,
+    };
+  },
+};
+
+export const getImportDetailsTool: ToolDefinition = {
+  name: 'get_import_details',
+  description: 'Get detailed information about a specific import including the raw data that was imported. Use this to see exactly what guests were in a specific Excel file.',
+  parameters: z.object({
+    import_id: z.string().optional().describe('ID of the import session (defaults to most recent)'),
+    show_data: z.boolean().default(false).describe('Whether to include the raw imported data'),
+    limit: z.coerce.number().max(100).default(20).describe('Maximum number of rows to return from raw data'),
+  }),
+  execute: async (params, supabase) => {
+    let query = supabase
+      .from('import_sessions')
+      .select('id, filename, status, total_rows, rows_added, rows_modified, rows_removed, rows_unchanged, rows_error, error_details, raw_data, created_at, completed_at');
+
+    if (params.import_id) {
+      query = query.eq('id', params.import_id);
+    } else {
+      query = query.order('created_at', { ascending: false }).limit(1);
+    }
+
+    const { data, error } = await query.single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (!data) {
+      return { success: false, error: 'Import session not found' };
+    }
+
+    const result: Record<string, unknown> = {
+      id: data.id,
+      filename: data.filename,
+      status: data.status,
+      total_rows: data.total_rows,
+      rows_added: data.rows_added,
+      rows_modified: data.rows_modified,
+      rows_removed: data.rows_removed,
+      rows_unchanged: data.rows_unchanged,
+      rows_error: data.rows_error,
+      created_at: data.created_at,
+      completed_at: data.completed_at,
+    };
+
+    if (data.error_details) {
+      result.errors = data.error_details;
+    }
+
+    // Include raw data if requested (limited)
+    if (params.show_data && data.raw_data) {
+      const rawData = data.raw_data as Record<string, unknown>[];
+      result.sample_data = rawData.slice(0, params.limit || 20);
+      result.data_preview_count = Math.min(rawData.length, params.limit || 20);
+      result.total_data_rows = rawData.length;
+    }
+
+    return {
+      success: true,
+      data: result,
+    };
+  },
+};
+
+export const compareImportDataTool: ToolDefinition = {
+  name: 'compare_import_data',
+  description: 'Deep compare the actual data between two Excel imports to find specific differences - which guests were added, removed, or had data changes',
+  parameters: z.object({
+    latest_import_id: z.string().optional().describe('ID of the latest import (defaults to most recent)'),
+    previous_import_id: z.string().optional().describe('ID of the previous import (defaults to second most recent)'),
+    show_details: z.boolean().default(true).describe('Show detailed list of changes'),
+    limit: z.coerce.number().max(50).default(20).describe('Maximum number of detailed changes to return'),
+  }),
+  execute: async (params, supabase) => {
+    // Get the two imports with raw data
+    const { data: imports, error: fetchError } = await supabase
+      .from('import_sessions')
+      .select('id, filename, status, raw_data, created_at')
+      .eq('status', 'completed')
+      .not('raw_data', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(2);
+
+    if (fetchError) {
+      return { success: false, error: fetchError.message };
+    }
+
+    if (!imports || imports.length < 2) {
+      return {
+        success: false,
+        error: 'Need at least 2 completed imports with data to compare. Found ' + (imports?.length || 0),
+      };
+    }
+
+    const latestImport = imports[0];
+    const previousImport = imports[1];
+
+    const latestData = (latestImport.raw_data || []) as Record<string, unknown>[];
+    const previousData = (previousImport.raw_data || []) as Record<string, unknown>[];
+
+    // Create maps by email for comparison
+    const latestByEmail = new Map<string, Record<string, unknown>>();
+    const previousByEmail = new Map<string, Record<string, unknown>>();
+
+    latestData.forEach((row) => {
+      const email = (row.email as string)?.toLowerCase();
+      if (email) latestByEmail.set(email, row);
+    });
+
+    previousData.forEach((row) => {
+      const email = (row.email as string)?.toLowerCase();
+      if (email) previousByEmail.set(email, row);
+    });
+
+    // Find differences
+    const added: Record<string, unknown>[] = [];
+    const removed: Record<string, unknown>[] = [];
+    const modified: { email: string; changes: { field: string; old: unknown; new: unknown }[] }[] = [];
+
+    // Find added and modified
+    latestByEmail.forEach((latestRow, email) => {
+      const previousRow = previousByEmail.get(email);
+      if (!previousRow) {
+        added.push(latestRow);
+      } else {
+        // Check for modifications
+        const changes: { field: string; old: unknown; new: unknown }[] = [];
+        const fieldsToCompare = ['firstName', 'lastName', 'location', 'arrivalDate', 'arrivalTime',
+          'departureDate', 'departureTime', 'registrationStatus', 'needsArrivalTransfer', 'needsDepartureTransfer'];
+
+        fieldsToCompare.forEach((field) => {
+          const oldVal = previousRow[field];
+          const newVal = latestRow[field];
+          if (String(oldVal || '') !== String(newVal || '')) {
+            changes.push({ field, old: oldVal, new: newVal });
+          }
+        });
+
+        if (changes.length > 0) {
+          modified.push({ email, changes });
+        }
+      }
+    });
+
+    // Find removed
+    previousByEmail.forEach((previousRow, email) => {
+      if (!latestByEmail.has(email)) {
+        removed.push(previousRow);
+      }
+    });
+
+    const result: Record<string, unknown> = {
+      latest_file: latestImport.filename,
+      latest_date: latestImport.created_at,
+      previous_file: previousImport.filename,
+      previous_date: previousImport.created_at,
+      summary: {
+        guests_added: added.length,
+        guests_removed: removed.length,
+        guests_modified: modified.length,
+        guests_unchanged: latestByEmail.size - added.length - modified.length,
+        latest_total: latestData.length,
+        previous_total: previousData.length,
+      },
+    };
+
+    if (params.show_details) {
+      const limit = params.limit || 20;
+      result.added_guests = added.slice(0, limit).map((g) => ({
+        email: g.email,
+        name: `${g.firstName} ${g.lastName}`,
+        location: g.location,
+      }));
+      result.removed_guests = removed.slice(0, limit).map((g) => ({
+        email: g.email,
+        name: `${g.firstName} ${g.lastName}`,
+        location: g.location,
+      }));
+      result.modified_guests = modified.slice(0, limit);
+    }
+
+    return {
+      success: true,
+      data: result,
     };
   },
 };
@@ -440,6 +626,8 @@ export const CHATBOT_TOOLS: ToolDefinition[] = [
   getTransportSchedulesTool,
   getImportHistoryTool,
   compareImportsTool,
+  getImportDetailsTool,
+  compareImportDataTool,
 ];
 
 // Convert tools to OpenAI/OpenRouter function format
