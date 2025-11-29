@@ -32,7 +32,7 @@ export interface ConversationContext {
 }
 
 // Allowed tables and columns for security
-export const ALLOWED_TABLES = ['guests', 'vehicles', 'transport_schedules', 'guest_transport_assignments'] as const;
+export const ALLOWED_TABLES = ['guests', 'vehicles', 'transport_schedules', 'guest_transport_assignments', 'import_sessions'] as const;
 export type AllowedTable = typeof ALLOWED_TABLES[number];
 
 export const TABLE_COLUMNS: Record<AllowedTable, string[]> = {

@@ -330,6 +330,104 @@ export const getTransportSchedulesTool: ToolDefinition = {
 };
 
 // ============================================
+// Import History Tools
+// ============================================
+
+export const getImportHistoryTool: ToolDefinition = {
+  name: 'get_import_history',
+  description: 'Get the history of Excel file imports, showing when files were uploaded and how many rows were added/updated',
+  parameters: z.object({
+    limit: z.coerce.number().max(20).default(10).describe('Maximum number of import sessions to return'),
+  }),
+  execute: async (params, supabase) => {
+    const { data, error } = await supabase
+      .from('import_sessions')
+      .select('id, filename, status, rows_added, rows_updated, rows_unchanged, rows_failed, created_at, completed_at')
+      .order('created_at', { ascending: false })
+      .limit(params.limit || 10);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      data: {
+        imports: data || [],
+        count: data?.length || 0,
+      },
+    };
+  },
+};
+
+export const compareImportsTool: ToolDefinition = {
+  name: 'compare_imports',
+  description: 'Compare two Excel imports to see the differences - how many rows were added, updated, or unchanged between the latest and previous import',
+  parameters: z.object({
+    latest_import_id: z.string().optional().describe('ID of the latest import session (defaults to most recent)'),
+    previous_import_id: z.string().optional().describe('ID of the previous import session (defaults to second most recent)'),
+  }),
+  execute: async (params, supabase) => {
+    // Get the two most recent imports if not specified
+    const { data: imports, error: fetchError } = await supabase
+      .from('import_sessions')
+      .select('id, filename, status, rows_added, rows_updated, rows_unchanged, rows_failed, created_at, completed_at')
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(2);
+
+    if (fetchError) {
+      return { success: false, error: fetchError.message };
+    }
+
+    if (!imports || imports.length < 2) {
+      return {
+        success: false,
+        error: 'Need at least 2 completed imports to compare. Only found ' + (imports?.length || 0),
+      };
+    }
+
+    const latestImport = imports[0];
+    const previousImport = imports[1];
+
+    // Calculate differences
+    const comparison = {
+      latest: {
+        filename: latestImport.filename,
+        date: latestImport.created_at,
+        rows_added: latestImport.rows_added || 0,
+        rows_updated: latestImport.rows_updated || 0,
+        rows_unchanged: latestImport.rows_unchanged || 0,
+        rows_failed: latestImport.rows_failed || 0,
+        total_processed: (latestImport.rows_added || 0) + (latestImport.rows_updated || 0) + (latestImport.rows_unchanged || 0),
+      },
+      previous: {
+        filename: previousImport.filename,
+        date: previousImport.created_at,
+        rows_added: previousImport.rows_added || 0,
+        rows_updated: previousImport.rows_updated || 0,
+        rows_unchanged: previousImport.rows_unchanged || 0,
+        rows_failed: previousImport.rows_failed || 0,
+        total_processed: (previousImport.rows_added || 0) + (previousImport.rows_updated || 0) + (previousImport.rows_unchanged || 0),
+      },
+      differences: {
+        new_guests_in_latest: latestImport.rows_added || 0,
+        guests_updated_in_latest: latestImport.rows_updated || 0,
+        guests_unchanged: latestImport.rows_unchanged || 0,
+        total_change: ((latestImport.rows_added || 0) + (latestImport.rows_updated || 0) + (latestImport.rows_unchanged || 0)) -
+                      ((previousImport.rows_added || 0) + (previousImport.rows_updated || 0) + (previousImport.rows_unchanged || 0)),
+      },
+      summary: `The latest import (${latestImport.filename}) added ${latestImport.rows_added || 0} new guests and updated ${latestImport.rows_updated || 0} existing guests compared to the previous import (${previousImport.filename}).`,
+    };
+
+    return {
+      success: true,
+      data: comparison,
+    };
+  },
+};
+
+// ============================================
 // Tool Registry
 // ============================================
 
@@ -340,6 +438,8 @@ export const CHATBOT_TOOLS: ToolDefinition[] = [
   getGuestStatsTool,
   getVehiclesTool,
   getTransportSchedulesTool,
+  getImportHistoryTool,
+  compareImportsTool,
 ];
 
 // Convert tools to OpenAI/OpenRouter function format
