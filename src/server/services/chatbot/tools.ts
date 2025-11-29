@@ -335,14 +335,14 @@ export const getTransportSchedulesTool: ToolDefinition = {
 
 export const getImportHistoryTool: ToolDefinition = {
   name: 'get_import_history',
-  description: 'Get the history of Excel file imports, showing when files were uploaded and how many rows were added/updated',
+  description: 'Get the history of Excel file imports, showing when files were uploaded, how many rows were added/updated, and whether the original file is available for download',
   parameters: z.object({
     limit: z.coerce.number().max(20).default(10).describe('Maximum number of import sessions to return'),
   }),
   execute: async (params, supabase) => {
     const { data, error } = await supabase
       .from('import_sessions')
-      .select('id, filename, status, rows_added, rows_updated, rows_unchanged, rows_failed, created_at, completed_at')
+      .select('id, filename, status, rows_added, rows_modified, rows_unchanged, rows_error, file_path, file_url, created_at, completed_at')
       .order('created_at', { ascending: false })
       .limit(params.limit || 10);
 
@@ -350,10 +350,16 @@ export const getImportHistoryTool: ToolDefinition = {
       return { success: false, error: error.message };
     }
 
+    // Add download availability flag
+    const importsWithDownload = (data || []).map((imp) => ({
+      ...imp,
+      has_original_file: !!imp.file_path,
+    }));
+
     return {
       success: true,
       data: {
-        imports: data || [],
+        imports: importsWithDownload,
         count: data?.length || 0,
       },
     };
@@ -429,7 +435,7 @@ export const compareImportsTool: ToolDefinition = {
 
 export const getImportDetailsTool: ToolDefinition = {
   name: 'get_import_details',
-  description: 'Get detailed information about a specific import including the raw data that was imported. Use this to see exactly what guests were in a specific Excel file.',
+  description: 'Get detailed information about a specific import including the raw data that was imported. Use this to see exactly what guests were in a specific Excel file and to get the download link for the original file.',
   parameters: z.object({
     import_id: z.string().optional().describe('ID of the import session (defaults to most recent)'),
     show_data: z.boolean().default(false).describe('Whether to include the raw imported data'),
@@ -438,7 +444,7 @@ export const getImportDetailsTool: ToolDefinition = {
   execute: async (params, supabase) => {
     let query = supabase
       .from('import_sessions')
-      .select('id, filename, status, total_rows, rows_added, rows_modified, rows_removed, rows_unchanged, rows_error, error_details, raw_data, created_at, completed_at');
+      .select('id, filename, status, total_rows, rows_added, rows_modified, rows_removed, rows_unchanged, rows_error, error_details, raw_data, file_path, file_url, created_at, completed_at');
 
     if (params.import_id) {
       query = query.eq('id', params.import_id);

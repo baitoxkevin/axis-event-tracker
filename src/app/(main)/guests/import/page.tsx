@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { parseExcelFile, applyColumnMapping } from '@/lib/excel-parser';
+import { uploadImportFile } from '@/lib/file-upload';
 import { trpc } from '@/lib/trpc/client';
 import { toast } from 'sonner';
 import {
@@ -48,6 +49,7 @@ export default function ImportPage() {
   // Import state
   const [diff, setDiff] = useState<ImportDiff | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [uploadedFilePath, setUploadedFilePath] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,12 +116,26 @@ export default function ImportPage() {
       setError(null);
 
       try {
+        // Upload the original Excel file to storage first
+        toast.info('Uploading file to storage...');
+        const uploadResult = await uploadImportFile(file!);
+
+        if (!uploadResult.success) {
+          console.warn('File upload failed (continuing without file storage):', uploadResult.error);
+          // Continue without file storage - this is non-critical
+        } else {
+          setUploadedFilePath(uploadResult.path || null);
+          toast.success('File uploaded successfully');
+        }
+
         const mappedData = applyColumnMapping(excelData, columnMapping);
 
         const result = await previewMutation.mutateAsync({
           data: mappedData,
           columnMapping,
           filename: file!.name,
+          filePath: uploadResult.path, // Pass the storage path
+          fileUrl: uploadResult.url,   // Pass the URL
         });
 
         setDiff(result.diff as unknown as ImportDiff);

@@ -10,6 +10,8 @@ const importPreviewSchema = z.object({
   data: z.array(z.record(z.string(), z.unknown())),
   columnMapping: columnMappingSchema,
   filename: z.string(),
+  filePath: z.string().optional(), // Storage path for original file
+  fileUrl: z.string().optional(),  // URL for original file
 });
 
 // Fields to track for diff
@@ -128,7 +130,7 @@ export const importRouter = router({
   preview: crewOnlyProcedure
     .input(importPreviewSchema)
     .mutation(async ({ ctx, input }) => {
-      const { data, columnMapping, filename } = input;
+      const { data, columnMapping, filename, filePath, fileUrl } = input;
 
       if (!ctx.supabase) {
         throw new Error('Database not configured');
@@ -251,6 +253,8 @@ export const importRouter = router({
           rows_error: diff.errors.length,
           error_details: diff.errors.length > 0 ? { errors: diff.errors } : null,
           raw_data: data, // Store original import data for comparison
+          file_path: filePath || null, // Storage path for original Excel file
+          file_url: fileUrl || null,   // URL for original Excel file
         })
         .select()
         .single();
