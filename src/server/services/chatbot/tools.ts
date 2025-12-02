@@ -620,6 +620,197 @@ export const compareImportDataTool: ToolDefinition = {
 };
 
 // ============================================
+// Guest Update Tools (AI-Powered)
+// ============================================
+
+export const updateGuestTool: ToolDefinition = {
+  name: 'update_guest',
+  description: 'Update a guest\'s information. Use this when the user wants to change flight details, transfer needs, hotel dates, or other guest data. Search for the guest by name or email first.',
+  parameters: z.object({
+    search_name: z.string().describe('Guest name to search for (first name, last name, or both)'),
+    search_email: z.string().optional().describe('Optional email to narrow down search'),
+    updates: z.object({
+      arrival_flight_number: z.string().optional().describe('New arrival flight number'),
+      arrival_date: z.string().optional().describe('New arrival date (YYYY-MM-DD)'),
+      arrival_time: z.string().optional().describe('New arrival time (HH:MM in 24hr format)'),
+      arrival_airport: z.string().optional().describe('New arrival airport'),
+      departure_flight_number: z.string().optional().describe('New departure flight number'),
+      departure_date: z.string().optional().describe('New departure date (YYYY-MM-DD)'),
+      departure_time: z.string().optional().describe('New departure time (HH:MM in 24hr format)'),
+      departure_airport: z.string().optional().describe('New departure airport'),
+      needs_arrival_transfer: z.boolean().optional().describe('Whether guest needs airport pickup'),
+      needs_departure_transfer: z.boolean().optional().describe('Whether guest needs airport dropoff'),
+      hotel_checkin_date: z.string().optional().describe('Hotel check-in date (YYYY-MM-DD)'),
+      hotel_checkout_date: z.string().optional().describe('Hotel check-out date (YYYY-MM-DD)'),
+      registration_status: z.enum(['confirmed', 'pending', 'cancelled', 'waitlisted']).optional(),
+    }).describe('Fields to update'),
+    reason: z.string().optional().describe('Reason for the update (for audit log)'),
+  }),
+  execute: async (params, supabase) => {
+    // First, find the guest
+    const searchTerms = params.search_name.toLowerCase().split(' ').filter(t => t.length > 0);
+
+    let query = supabase
+      .from('guests')
+      .select('id, first_name, last_name, email, arrival_flight_number, departure_flight_number, needs_arrival_transfer, needs_departure_transfer')
+      .or('is_removed.eq.false,is_removed.is.null');
+
+    // Build search conditions
+    if (searchTerms.length === 1) {
+      // Single term - search both first and last name
+      query = query.or(`first_name.ilike.%${searchTerms[0]}%,last_name.ilike.%${searchTerms[0]}%`);
+    } else if (searchTerms.length >= 2) {
+      // Multiple terms - try first + last name combination
+      query = query.or(`and(first_name.ilike.%${searchTerms[0]}%,last_name.ilike.%${searchTerms[searchTerms.length - 1]}%),and(first_name.ilike.%${searchTerms[searchTerms.length - 1]}%,last_name.ilike.%${searchTerms[0]}%)`);
+    }
+
+    if (params.search_email) {
+      query = query.ilike('email', `%${params.search_email}%`);
+    }
+
+    const { data: guests, error: searchError } = await query.limit(5);
+
+    if (searchError) {
+      return { success: false, error: `Search error: ${searchError.message}` };
+    }
+
+    if (!guests || guests.length === 0) {
+      return {
+        success: false,
+        error: `No guest found matching "${params.search_name}". Please check the name spelling.`
+      };
+    }
+
+    if (guests.length > 1) {
+      return {
+        success: false,
+        error: `Multiple guests found matching "${params.search_name}": ${guests.map(g => `${g.first_name} ${g.last_name} (${g.email})`).join(', ')}. Please be more specific.`,
+        data: { matches: guests }
+      };
+    }
+
+    const guest = guests[0];
+
+    // Filter out undefined values from updates
+    const validUpdates: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(params.updates)) {
+      if (value !== undefined && value !== null) {
+        validUpdates[key] = value;
+      }
+    }
+
+    if (Object.keys(validUpdates).length === 0) {
+      return { success: false, error: 'No updates provided' };
+    }
+
+    // Add updated_at timestamp
+    validUpdates.updated_at = new Date().toISOString();
+
+    // Perform the update
+    const { error: updateError } = await supabase
+      .from('guests')
+      .update(validUpdates)
+      .eq('id', guest.id);
+
+    if (updateError) {
+      return { success: false, error: `Update error: ${updateError.message}` };
+    }
+
+    // Build a human-readable summary of changes
+    const changesList = Object.entries(validUpdates)
+      .filter(([key]) => key !== 'updated_at')
+      .map(([key, value]) => {
+        const fieldLabels: Record<string, string> = {
+          arrival_flight_number: 'Arrival Flight',
+          arrival_date: 'Arrival Date',
+          arrival_time: 'Arrival Time',
+          arrival_airport: 'Arrival Airport',
+          departure_flight_number: 'Departure Flight',
+          departure_date: 'Departure Date',
+          departure_time: 'Departure Time',
+          departure_airport: 'Departure Airport',
+          needs_arrival_transfer: 'Needs Arrival Transfer',
+          needs_departure_transfer: 'Needs Departure Transfer',
+          hotel_checkin_date: 'Hotel Check-in',
+          hotel_checkout_date: 'Hotel Check-out',
+          registration_status: 'Registration Status',
+        };
+        return `${fieldLabels[key] || key}: ${value}`;
+      });
+
+    return {
+      success: true,
+      data: {
+        guest_id: guest.id,
+        guest_name: `${guest.first_name} ${guest.last_name}`,
+        guest_email: guest.email,
+        updates_applied: validUpdates,
+        changes_summary: changesList,
+        reason: params.reason || 'Manual update via chatbot',
+      },
+    };
+  },
+};
+
+export const findGuestTool: ToolDefinition = {
+  name: 'find_guest',
+  description: 'Find a specific guest by name or email to get their current details before making updates',
+  parameters: z.object({
+    search: z.string().describe('Name or email to search for'),
+  }),
+  execute: async (params, supabase) => {
+    const searchTerm = params.search.toLowerCase();
+
+    const { data: guests, error } = await supabase
+      .from('guests')
+      .select('id, first_name, last_name, email, location, arrival_date, arrival_time, arrival_flight_number, arrival_airport, departure_date, departure_time, departure_flight_number, departure_airport, needs_arrival_transfer, needs_departure_transfer, hotel_checkin_date, hotel_checkout_date, registration_status')
+      .or('is_removed.eq.false,is_removed.is.null')
+      .or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
+      .limit(10);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (!guests || guests.length === 0) {
+      return { success: false, error: `No guest found matching "${params.search}"` };
+    }
+
+    return {
+      success: true,
+      data: {
+        guests: guests.map(g => ({
+          id: g.id,
+          name: `${g.first_name} ${g.last_name}`,
+          email: g.email,
+          location: g.location,
+          arrival: g.arrival_date ? {
+            date: g.arrival_date,
+            time: g.arrival_time,
+            flight: g.arrival_flight_number,
+            airport: g.arrival_airport,
+            needs_transfer: g.needs_arrival_transfer,
+          } : null,
+          departure: g.departure_date ? {
+            date: g.departure_date,
+            time: g.departure_time,
+            flight: g.departure_flight_number,
+            airport: g.departure_airport,
+            needs_transfer: g.needs_departure_transfer,
+          } : null,
+          hotel: {
+            checkin: g.hotel_checkin_date,
+            checkout: g.hotel_checkout_date,
+          },
+          status: g.registration_status,
+        })),
+        count: guests.length,
+      },
+    };
+  },
+};
+
+// ============================================
 // Tool Registry
 // ============================================
 
@@ -634,6 +825,8 @@ export const CHATBOT_TOOLS: ToolDefinition[] = [
   compareImportsTool,
   getImportDetailsTool,
   compareImportDataTool,
+  updateGuestTool,
+  findGuestTool,
 ];
 
 // Convert tools to OpenAI/OpenRouter function format
