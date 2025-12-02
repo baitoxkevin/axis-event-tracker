@@ -1,11 +1,12 @@
 // User roles
-export type UserRole = 'event_registration_crew' | 'transport_arranger';
+export type UserRole = 'superadmin' | 'event_registration_crew' | 'transport_arranger';
 
 // Guest types
 export interface Guest {
   id: string;
   externalId?: string;
   email: string;
+  salutation?: string;
   firstName: string;
   lastName: string;
   axisEmail?: string;
@@ -34,6 +35,7 @@ export interface Guest {
   // Hotel
   hotelCheckinDate?: Date;
   hotelCheckoutDate?: Date;
+  hotelConfirmationNumber?: string;
   extendStayBefore?: boolean;
   extendStayAfter?: boolean;
   earlyCheckin?: string;

@@ -24,6 +24,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 // Guest field definitions for mapping
 const GUEST_FIELDS = [
   { key: 'email', label: 'Email', required: true, group: 'Basic Info' },
+  { key: 'salutation', label: 'Salutation', required: false, group: 'Basic Info' },
   { key: 'firstName', label: 'First Name', required: true, group: 'Basic Info' },
   { key: 'lastName', label: 'Last Name', required: true, group: 'Basic Info' },
   { key: 'axisEmail', label: 'Axis Email', required: false, group: 'Basic Info' },
@@ -44,6 +45,7 @@ const GUEST_FIELDS = [
   { key: 'departureFlightRoute', label: 'Departure Flight Route', required: false, group: 'Flight - Departure' },
   { key: 'hotelCheckinDate', label: 'Hotel Check-in Date', required: false, group: 'Hotel' },
   { key: 'hotelCheckoutDate', label: 'Hotel Check-out Date', required: false, group: 'Hotel' },
+  { key: 'hotelConfirmationNumber', label: 'Hotel Confirmation Number', required: false, group: 'Hotel' },
   { key: 'extendStayBefore', label: 'Extend Stay Before', required: false, group: 'Hotel' },
   { key: 'extendStayAfter', label: 'Extend Stay After', required: false, group: 'Hotel' },
   { key: 'earlyCheckin', label: 'Early Check-in', required: false, group: 'Hotel' },
@@ -57,6 +59,7 @@ const GUEST_FIELDS = [
 // Auto-mapping patterns
 const AUTO_MAP_PATTERNS: Record<string, string[]> = {
   email: ['email', 'e-mail', 'email address', 'e-mail address'],
+  salutation: ['salutation', 'title', 'mr', 'mrs', 'ms', 'dr', 'prefix'],
   firstName: ['first name', 'firstname', 'given name', 'first'],
   lastName: ['last name', 'lastname', 'family name', 'surname', 'last'],
   axisEmail: ['axis email', 'work email', 'corporate email'],
@@ -75,6 +78,7 @@ const AUTO_MAP_PATTERNS: Record<string, string[]> = {
   departureAirport: ['departure airport', 'departing airport'],
   hotelCheckinDate: ['check-in date', 'checkin date', 'hotel check-in', 'check in'],
   hotelCheckoutDate: ['check-out date', 'checkout date', 'hotel check-out', 'check out'],
+  hotelConfirmationNumber: ['confirmation number', 'hotel confirmation', 'booking number', 'reservation number', 'confirmation'],
   needsArrivalTransfer: ['arrival transfer', 'airport transfer arrival', 'need arrival transfer'],
   needsDepartureTransfer: ['departure transfer', 'airport transfer departure', 'need departure transfer'],
   registrationStatus: ['status', 'registration status', 'reg status'],

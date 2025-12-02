@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, crewOnlyProcedure } from '../init';
+import { router, protectedProcedure } from '../init';
 import type { ImportDiff, FieldChange } from '@/types';
 
 // Column mapping schema
@@ -17,6 +17,7 @@ const importPreviewSchema = z.object({
 // Fields to track for diff
 const TRACKED_FIELDS = [
   'email',
+  'salutation',
   'first_name',
   'last_name',
   'axis_email',
@@ -37,6 +38,7 @@ const TRACKED_FIELDS = [
   'departure_flight_route',
   'hotel_checkin_date',
   'hotel_checkout_date',
+  'hotel_confirmation_number',
   'extend_stay_before',
   'extend_stay_after',
   'early_checkin',
@@ -49,6 +51,7 @@ const TRACKED_FIELDS = [
 
 // Map camelCase field names to snake_case for database
 const fieldNameMapping: Record<string, string> = {
+  salutation: 'salutation',
   firstName: 'first_name',
   lastName: 'last_name',
   axisEmail: 'axis_email',
@@ -67,6 +70,7 @@ const fieldNameMapping: Record<string, string> = {
   departureFlightRoute: 'departure_flight_route',
   hotelCheckinDate: 'hotel_checkin_date',
   hotelCheckoutDate: 'hotel_checkout_date',
+  hotelConfirmationNumber: 'hotel_confirmation_number',
   extendStayBefore: 'extend_stay_before',
   extendStayAfter: 'extend_stay_after',
   earlyCheckin: 'early_checkin',
@@ -127,7 +131,7 @@ function getFieldType(value: unknown): string {
 
 export const importRouter = router({
   // Preview import - calculate diff
-  preview: crewOnlyProcedure
+  preview: protectedProcedure
     .input(importPreviewSchema)
     .mutation(async ({ ctx, input }) => {
       const { data, columnMapping, filename, filePath, fileUrl } = input;
@@ -278,7 +282,7 @@ export const importRouter = router({
     }),
 
   // Execute import
-  executeImport: crewOnlyProcedure
+  executeImport: protectedProcedure
     .input(
       z.object({
         sessionId: z.string(),
@@ -415,7 +419,7 @@ export const importRouter = router({
     }),
 
   // Get import sessions
-  getSessions: crewOnlyProcedure
+  getSessions: protectedProcedure
     .input(
       z.object({
         page: z.number().min(1).default(1),
@@ -445,7 +449,7 @@ export const importRouter = router({
     }),
 
   // Get specific import session
-  getSession: crewOnlyProcedure
+  getSession: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.supabase) {

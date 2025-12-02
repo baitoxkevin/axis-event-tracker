@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/layout/page-header';
 import { FileDropzone } from '@/components/import/file-dropzone';
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { parseExcelFile, applyColumnMapping } from '@/lib/excel-parser';
+import { parseExcelFile, applyColumnMapping, validateMappedData, validateAllCells, type ValidationResult, type CellValidationResult } from '@/lib/excel-parser';
 import { uploadImportFile } from '@/lib/file-upload';
 import { trpc } from '@/lib/trpc/client';
 import { toast } from 'sonner';
@@ -21,7 +21,9 @@ import {
   Check,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   FileSpreadsheet,
+  XCircle,
 } from 'lucide-react';
 import type { ImportDiff } from '@/types';
 
@@ -52,6 +54,8 @@ export default function ImportPage() {
   const [uploadedFilePath, setUploadedFilePath] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [cellValidation, setCellValidation] = useState<CellValidationResult | null>(null);
 
   // tRPC mutations
   const previewMutation = trpc.import.preview.useMutation();
@@ -64,6 +68,22 @@ export default function ImportPage() {
   // Step index for progress
   const currentStepIndex = STEPS.findIndex((s) => s.key === currentStep);
   const progress = ((currentStepIndex + 1) / STEPS.length) * 100;
+
+  // Run validation when mapping changes (once email is mapped)
+  useEffect(() => {
+    if (currentStep !== 'mapping' || excelData.length === 0) return;
+
+    // Check if email column is mapped
+    const emailMapped = Object.values(columnMapping).includes('email');
+    if (!emailMapped) {
+      setValidationResult(null);
+      return;
+    }
+
+    // Run validation
+    const validation = validateMappedData(excelData, columnMapping);
+    setValidationResult(validation);
+  }, [currentStep, columnMapping, excelData]);
 
   // Handle file selection
   const handleFileSelect = useCallback(async (selectedFile: File) => {
@@ -83,7 +103,19 @@ export default function ImportPage() {
       });
       setColumnMapping(initialMapping);
 
-      toast.success(`Loaded ${parsed.data.length} rows from "${parsed.sheetName}"`);
+      // Run comprehensive cell validation on ALL cells immediately
+      const cellValidationResult = validateAllCells(parsed.data, parsed.columns);
+      setCellValidation(cellValidationResult);
+
+      // Show toast with validation summary
+      if (cellValidationResult.issueCount > 0) {
+        toast.warning(
+          `Loaded ${parsed.data.length} rows. Found ${cellValidationResult.issueCount} potential data issue(s).`,
+          { duration: 5000 }
+        );
+      } else {
+        toast.success(`Loaded ${parsed.data.length} rows from "${parsed.sheetName}"`);
+      }
     } catch (err) {
       setError(String(err));
       toast.error('Failed to parse Excel file');
@@ -109,6 +141,24 @@ export default function ImportPage() {
       if (missingRequired.length > 0) {
         toast.error(`Please map required fields: ${missingRequired.join(', ')}`);
         return;
+      }
+
+      // Run early validation before processing
+      const validation = validateMappedData(excelData, columnMapping);
+      setValidationResult(validation);
+
+      // Show warnings for data issues
+      if (validation.stats.invalidEmails > 0) {
+        toast.warning(
+          `Found ${validation.stats.invalidEmails} row(s) with invalid email format. These will be skipped.`,
+          { duration: 5000 }
+        );
+      }
+      if (validation.stats.duplicateEmails > 0) {
+        toast.warning(
+          `Found ${validation.stats.duplicateEmails} duplicate email(s) in the file.`,
+          { duration: 5000 }
+        );
       }
 
       // Apply mapping and calculate diff
@@ -263,26 +313,194 @@ export default function ImportPage() {
               />
 
               {file && excelData.length > 0 && (
-                <Alert>
-                  <FileSpreadsheet className="h-4 w-4" />
-                  <AlertTitle>File loaded successfully</AlertTitle>
-                  <AlertDescription>
-                    Found {excelColumns.length} columns and {excelData.length} rows.
-                    Click Next to map columns to guest fields.
-                  </AlertDescription>
-                </Alert>
+                <>
+                  <Alert>
+                    <FileSpreadsheet className="h-4 w-4" />
+                    <AlertTitle>File loaded successfully</AlertTitle>
+                    <AlertDescription>
+                      Found {excelColumns.length} columns and {excelData.length} rows.
+                      Click Next to map columns to guest fields.
+                    </AlertDescription>
+                  </Alert>
+
+                  {/* Cell-level validation results */}
+                  {cellValidation && cellValidation.issueCount > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        Data Quality Check ({cellValidation.issueCount} potential issue{cellValidation.issueCount !== 1 ? 's' : ''})
+                      </h4>
+
+                      {/* Issue summary by severity */}
+                      <div className="flex flex-wrap gap-2 text-sm">
+                        {cellValidation.issues.filter(i => i.severity === 'error').length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-red-700">
+                            <XCircle className="h-3 w-3" />
+                            {cellValidation.issues.filter(i => i.severity === 'error').length} error(s)
+                          </span>
+                        )}
+                        {cellValidation.issues.filter(i => i.severity === 'warning').length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-700">
+                            <AlertTriangle className="h-3 w-3" />
+                            {cellValidation.issues.filter(i => i.severity === 'warning').length} warning(s)
+                          </span>
+                        )}
+                        {cellValidation.issues.filter(i => i.severity === 'info').length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-blue-700">
+                            <AlertCircle className="h-3 w-3" />
+                            {cellValidation.issues.filter(i => i.severity === 'info').length} info
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Detailed issues table */}
+                      <div className="max-h-48 overflow-y-auto rounded border bg-muted/50 p-3 text-sm">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b text-left text-xs text-muted-foreground">
+                              <th className="pb-2 pr-4">Row</th>
+                              <th className="pb-2 pr-4">Column</th>
+                              <th className="pb-2 pr-4">Value</th>
+                              <th className="pb-2 pr-4">Issue</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cellValidation.issues.slice(0, 15).map((issue, idx) => (
+                              <tr key={idx} className="border-b border-border/50 last:border-0">
+                                <td className="py-1.5 pr-4 font-mono text-xs">{issue.row}</td>
+                                <td className="py-1.5 pr-4 font-medium">{issue.column}</td>
+                                <td className="py-1.5 pr-4 font-mono text-xs max-w-[150px] truncate">
+                                  {String(issue.value ?? '(empty)')}
+                                </td>
+                                <td className="py-1.5 pr-4">
+                                  <span className={
+                                    issue.severity === 'error'
+                                      ? 'text-red-600'
+                                      : issue.severity === 'warning'
+                                        ? 'text-amber-600'
+                                        : 'text-blue-600'
+                                  }>
+                                    {issue.message}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {cellValidation.issues.length > 15 && (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            ... and {cellValidation.issues.length - 15} more issues
+                          </p>
+                        )}
+                      </div>
+
+                      <Alert variant="default" className="border-amber-200 bg-amber-50">
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertTitle className="text-amber-800">Review data before continuing</AlertTitle>
+                        <AlertDescription className="text-amber-700">
+                          Some cells contain unexpected data types. You can still proceed, but check if the values are correct before importing.
+                        </AlertDescription>
+                      </Alert>
+                    </div>
+                  )}
+
+                  {/* All clear message */}
+                  {cellValidation && cellValidation.issueCount === 0 && (
+                    <Alert variant="default" className="border-green-200 bg-green-50">
+                      <Check className="h-4 w-4 text-green-600" />
+                      <AlertTitle className="text-green-800">Data looks good!</AlertTitle>
+                      <AlertDescription className="text-green-700">
+                        All cells passed validation. Click Next to continue with column mapping.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </>
               )}
             </div>
           )}
 
           {/* Mapping Step */}
           {currentStep === 'mapping' && (
-            <ColumnMapper
-              excelColumns={excelColumns}
-              sampleData={excelData.slice(0, 3)}
-              mapping={columnMapping}
-              onMappingChange={setColumnMapping}
-            />
+            <div className="space-y-6">
+              <ColumnMapper
+                excelColumns={excelColumns}
+                sampleData={excelData.slice(0, 3)}
+                mapping={columnMapping}
+                onMappingChange={setColumnMapping}
+              />
+
+              {/* Validation warnings - shown after mapping is set */}
+              {validationResult && validationResult.issues.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    Data Quality Issues Found
+                  </h4>
+
+                  {/* Summary stats */}
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    {validationResult.stats.invalidEmails > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-red-700">
+                        <XCircle className="h-3 w-3" />
+                        {validationResult.stats.invalidEmails} invalid email(s)
+                      </span>
+                    )}
+                    {validationResult.stats.missingRequired > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-red-700">
+                        <XCircle className="h-3 w-3" />
+                        {validationResult.stats.missingRequired} missing required field(s)
+                      </span>
+                    )}
+                    {validationResult.stats.duplicateEmails > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-700">
+                        <AlertTriangle className="h-3 w-3" />
+                        {validationResult.stats.duplicateEmails} duplicate email(s)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Detailed issues list */}
+                  <div className="max-h-48 overflow-y-auto rounded border bg-muted/50 p-3 text-sm">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b text-left text-xs text-muted-foreground">
+                          <th className="pb-2 pr-4">Row</th>
+                          <th className="pb-2 pr-4">Field</th>
+                          <th className="pb-2 pr-4">Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {validationResult.issues.slice(0, 10).map((issue, idx) => (
+                          <tr key={idx} className="border-b border-border/50 last:border-0">
+                            <td className="py-1.5 pr-4 font-mono text-xs">{issue.row}</td>
+                            <td className="py-1.5 pr-4">{issue.field}</td>
+                            <td className="py-1.5 pr-4">
+                              <span className={issue.severity === 'error' ? 'text-red-600' : 'text-amber-600'}>
+                                {issue.message}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {validationResult.issues.length > 10 && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        ... and {validationResult.issues.length - 10} more issues
+                      </p>
+                    )}
+                  </div>
+
+                  <Alert variant="default" className="border-amber-200 bg-amber-50">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <AlertTitle className="text-amber-800">Rows with errors will be skipped</AlertTitle>
+                    <AlertDescription className="text-amber-700">
+                      Rows with invalid or missing required fields will not be imported.
+                      You can continue with the import or fix the issues in your Excel file first.
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Preview Step */}

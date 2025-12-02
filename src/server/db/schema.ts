@@ -19,7 +19,7 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   name: varchar('name', { length: 255 }).notNull(),
-  role: varchar('role', { length: 50 }).notNull().$type<'event_registration_crew' | 'transport_arranger'>(),
+  role: varchar('role', { length: 50 }).notNull().$type<'superadmin' | 'event_registration_crew' | 'transport_arranger'>(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -29,6 +29,7 @@ export const guests = pgTable('guests', {
   id: uuid('id').defaultRandom().primaryKey(),
   externalId: varchar('external_id', { length: 50 }),
   email: varchar('email', { length: 255 }).notNull(),
+  salutation: varchar('salutation', { length: 20 }),
   firstName: varchar('first_name', { length: 100 }).notNull(),
   lastName: varchar('last_name', { length: 100 }).notNull(),
   axisEmail: varchar('axis_email', { length: 255 }),
@@ -71,6 +72,7 @@ export const guests = pgTable('guests', {
   // Hotel
   hotelCheckinDate: date('hotel_checkin_date'),
   hotelCheckoutDate: date('hotel_checkout_date'),
+  hotelConfirmationNumber: varchar('hotel_confirmation_number', { length: 50 }),
   extendStayBefore: boolean('extend_stay_before').default(false),
   extendStayAfter: boolean('extend_stay_after').default(false),
   earlyCheckin: varchar('early_checkin', { length: 50 }),
@@ -157,6 +159,9 @@ export const importSessions = pgTable('import_sessions', {
   rowsUnchanged: integer('rows_unchanged').default(0),
   rowsError: integer('rows_error').default(0),
   errorDetails: jsonb('error_details'),
+  rawData: jsonb('raw_data'), // Store original import data for comparison
+  filePath: varchar('file_path', { length: 500 }), // Storage path for original file
+  fileUrl: varchar('file_url', { length: 500 }), // URL for original file
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
