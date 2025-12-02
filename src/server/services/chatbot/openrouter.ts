@@ -4,7 +4,14 @@
  */
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'x-ai/grok-4.1-fast';
+
+// Primary model with fallback
+const PRIMARY_MODEL = 'anthropic/claude-3.5-haiku';
+const FALLBACK_MODEL = 'google/gemini-2.0-flash-001';
+
+function getModel(): string {
+  return process.env.OPENROUTER_MODEL || PRIMARY_MODEL;
+}
 
 // Database schema context for the AI
 const DATABASE_SCHEMA = `
@@ -103,14 +110,16 @@ interface ResponseGenerationResult {
 }
 
 /**
- * Call OpenRouter API with Grok 4.1-fast model
+ * Call OpenRouter API with automatic fallback
  */
-async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
+async function callOpenRouter(messages: ChatMessage[], model?: string): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is not configured');
   }
+
+  const modelToUse = model || getModel();
 
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
@@ -121,7 +130,7 @@ async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
       'X-Title': 'Axis Event Tracker',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: modelToUse,
       messages,
       temperature: 0.3, // Lower temperature for more consistent SQL generation
       max_tokens: 1024,
@@ -130,12 +139,38 @@ async function callOpenRouter(messages: ChatMessage[]): Promise<string> {
 
   if (!response.ok) {
     const errorText = await response.text();
+
+    // Try fallback model if primary fails
+    if (!model && modelToUse !== FALLBACK_MODEL) {
+      console.warn(`Primary model ${modelToUse} failed, trying fallback`);
+      return callOpenRouter(messages, FALLBACK_MODEL);
+    }
+
+    // Check for HTML error response
+    if (errorText.startsWith('<') || errorText.includes('<!DOCTYPE')) {
+      throw new Error(`OpenRouter service unavailable. Status: ${response.status}`);
+    }
+
     throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+  }
+
+  // Check content type before parsing
+  const contentType = response.headers.get('content-type');
+  if (!contentType?.includes('application/json')) {
+    if (!model && modelToUse !== FALLBACK_MODEL) {
+      console.warn(`Primary model returned non-JSON, trying fallback`);
+      return callOpenRouter(messages, FALLBACK_MODEL);
+    }
+    throw new Error('OpenRouter returned non-JSON response');
   }
 
   const data = await response.json() as OpenRouterResponse;
 
   if (data.error) {
+    if (!model && modelToUse !== FALLBACK_MODEL) {
+      console.warn(`Model error: ${data.error.message}, trying fallback`);
+      return callOpenRouter(messages, FALLBACK_MODEL);
+    }
     throw new Error(`OpenRouter error: ${data.error.message}`);
   }
 
