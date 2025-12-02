@@ -219,7 +219,12 @@ function AddedGuestRow({ guest }: { guest: Partial<Guest> }) {
   );
 }
 
-function RemovedGuestRow({ guest }: { guest: Guest }) {
+function RemovedGuestRow({ guest }: { guest: Guest & { first_name?: string; last_name?: string } }) {
+  // Handle both camelCase and snake_case field names from database
+  const firstName = guest.firstName || guest.first_name || '';
+  const lastName = guest.lastName || guest.last_name || '';
+  const fullName = `${firstName} ${lastName}`.trim() || 'Unknown';
+
   return (
     <TableRow className="bg-red-50/50">
       <TableCell>
@@ -228,7 +233,7 @@ function RemovedGuestRow({ guest }: { guest: Guest }) {
       <TableCell>
         <div>
           <span className="font-medium">
-            {guest.firstName} {guest.lastName}
+            {fullName}
           </span>
           <p className="text-sm text-muted-foreground">{guest.email}</p>
         </div>
