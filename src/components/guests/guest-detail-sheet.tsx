@@ -33,6 +33,8 @@ import {
   Briefcase,
   Navigation,
   DoorOpen,
+  Bed,
+  Hash,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
@@ -46,6 +48,8 @@ interface Guest {
   firstName: string;
   lastName: string;
   axisEmail?: string | null;
+  salutation?: string | null;
+  gender?: string | null;
   reportingLevel1?: string | null;
   reportingLevel2?: string | null;
   reportingLevel3?: string | null;
@@ -62,6 +66,13 @@ interface Guest {
   hotelCheckinDate?: string | null;
   hotelCheckoutDate?: string | null;
   hotelRoomNumber?: string | null;
+  hotelConfirmationNumber?: string | null;
+  roomType?: string | null;
+  beddingPreference?: string | null;
+  dietaryRequirements?: string | null;
+  specialRequests?: string | null;
+  tableNumber?: string | null;
+  awardsMenuSelection?: string | null;
   needsArrivalTransfer?: boolean | null;
   needsDepartureTransfer?: boolean | null;
   registrationStatus?: string | null;
@@ -544,14 +555,38 @@ export function GuestDetailSheet({
                 </div>
                 <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Hotel</h4>
               </div>
-              {(guest.hotelCheckinDate || guest.hotelCheckoutDate || guest.hotelRoomNumber) ? (
+              {(guest.hotelCheckinDate || guest.hotelCheckoutDate || guest.hotelRoomNumber || guest.roomType || guest.hotelConfirmationNumber) ? (
                 <div className="rounded-xl bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950/30 dark:to-violet-950/30 p-4 border border-purple-100 dark:border-purple-900/50">
                   <div className="space-y-3">
+                    {/* Confirmation Number */}
+                    {guest.hotelConfirmationNumber && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                          <Hash className="h-3.5 w-3.5 text-purple-500" />
+                          Confirmation
+                        </span>
+                        <span className="text-sm font-mono font-medium text-slate-900 dark:text-white">
+                          {guest.hotelConfirmationNumber}
+                        </span>
+                      </div>
+                    )}
+                    {/* Room Type & Bedding */}
+                    {(guest.roomType || guest.beddingPreference) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                          <Bed className="h-3.5 w-3.5 text-purple-500" />
+                          Room Type
+                        </span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">
+                          {[guest.roomType, guest.beddingPreference].filter(Boolean).join(' / ') || 'TBD'}
+                        </span>
+                      </div>
+                    )}
                     {/* Room Number */}
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-2">
                         <DoorOpen className="h-3.5 w-3.5 text-purple-500" />
-                        Room
+                        Room #
                       </span>
                       <span className={cn(
                         'text-sm font-medium',
